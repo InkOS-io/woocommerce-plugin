@@ -46,6 +46,8 @@ WooCommerce Action Scheduler writes a recovery action before the request. Transp
 
 **Needs review** identifies an invalid configuration, rejected original terms, credential problem or conflict. Inspect the message on the order. After restoring the connection, choose **Retry InkOS synchronization** in the WooCommerce order’s **Order actions** menu. A retry always preserves the buyer’s terms. If InkOS never accepted an expired quote, arrange a new customer-approved checkout and reconcile the original payment in WooCommerce. A replay of a previously accepted checkout recovers the original receipt even after expiration.
 
+WooCommerce’s order anonymization removes the local InkOS submission contact and payment reference and stops pending synchronization. Accepted order and work-order references remain available to staff. For a submitted order, the print shop must also address any retention or erasure request for the copy it holds in InkOS.
+
 ## Reproduce a sandbox checkout
 
 1. Use an isolated InkOS database with synthetic shop, customer and product data. Set up the storefront through the administration endpoints in the [API developer guide](https://github.com/InkOS-io/ecommerce-api). Keep storefront credentials outside the plugin source.
@@ -69,3 +71,5 @@ In isolated WordPress 7.1.5, WooCommerce 11.3.1 and real InkOS/PostgreSQL instan
 A second Store API checkout exercised a dropped response after the InkOS transaction committed. WooCommerce persisted a retry, and the worker received HTTP 200 for the original HTTP 201 result with identical order and work-order IDs, payload, key and payment reference. Replaying the WooCommerce payment event after synchronization sent no further request.
 
 The integration uses the [WooCommerce block checkout lifecycle](https://developer.woocommerce.com/docs/block-development/extensible-blocks/cart-and-checkout-blocks/how-checkout-processes-an-order/), [supported cart and checkout hooks](https://developer.woocommerce.com/docs/block-development/reference/hooks/hook-alternatives/), [HPOS order-storage APIs](https://developer.woocommerce.com/docs/features/orders/high-performance-order-storage/recipe-book/) and [Action Scheduler APIs](https://actionscheduler.org/api/). Admin writes check WordPress capabilities and [request nonces](https://developer.wordpress.org/reference/functions/check_admin_referer/).
+
+Run `wp eval-file tests/privacy-eraser.php` in a local WooCommerce test site to check anonymization of pending and accepted submissions.

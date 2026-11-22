@@ -47,6 +47,7 @@ final class Orders {
 				self::send( $order->get_id(), 0, true );
 			}
 		} );
+		add_action( 'woocommerce_privacy_before_remove_order_personal_data', array( __CLASS__, 'erase_contact' ) );
 		add_action( 'woocommerce_delete_order', static function ( $id ) {
 			delete_option( self::outbox_name( $id ) );
 		} );
@@ -85,6 +86,9 @@ final class Orders {
 			|| $total !== self::cents( $order->get_total() ) || $order->get_items( 'fee' ) || self::cents( $order->get_shipping_total() ) || self::cents( $order->get_discount_total() ) || self::cents( $order->get_total_tax() ) ) {
 			throw new ApiError( 'unsupported_total', 'Check out print items separately with the exact InkOS total. Remove coupons and choose a free delivery or pickup method. Contact the shop if taxes or fees differ.', 409 );
 		}
+		if ( 'yes' === $order->get_meta( '_anonymized' ) ) {
+			throw new ApiError( 'customer_erased', 'This order was anonymized and cannot be submitted for printing.', 409 );
+		}
 		$name = trim( $order->get_billing_first_name() . ' ' . $order->get_billing_last_name() );
 		$email = $order->get_billing_email();
 		if ( '' === $name || ! is_email( $email ) ) {
@@ -111,6 +115,27 @@ final class Orders {
 		return 'inkos_woo_submission_' . (int) $id;
 	}
 
+	// WooCommerce saves the order after this hook. Leave a nonpersonal marker so an in-flight
+	// gateway callback cannot insert its old contact payload back into an empty outbox.
+	public static function erase_contact( $order ) {
+		$name = self::outbox_name( $order->get_id() );
+		if ( ! $order->get_meta( '_inkos_draft' ) && false === get_option( $name ) ) {
+			return;
+		}
+		global $wpdb;
+		$erased = $wpdb->replace( $wpdb->options, array( 'option_name' => $name, 'option_value' => '{"erased":true}', 'autoload' => 'no' ) );
+		if ( false === $erased ) {
+			throw new \RuntimeException( 'WooCommerce could not erase the InkOS submission. Retry order anonymization.' );
+		}
+		wp_cache_delete( $name, 'options' );
+		$order->delete_meta_data( '_inkos_draft' );
+		$order->delete_meta_data( '_inkos_error' );
+		$order->delete_meta_data( '_inkos_retry_at' );
+		if ( ! $order->get_meta( '_inkos_receipt' ) ) {
+			$order->update_meta_data( '_inkos_state', 'Stopped after order anonymization' );
+		}
+	}
+
 	// Concurrent gateway callbacks must agree on one immutable body, including a possibly late transaction ID.
 	// Only the plugin's own non-autoloaded option uses SQL. WooCommerce owns all order storage.
 	private static function submission( $order, $draft ) {
@@ -129,6 +154,9 @@ final class Orders {
 			throw new ApiError( 'outbox_unavailable', 'WooCommerce could not persist the InkOS submission.' );
 		}
 		$draft = json_decode( (string) $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM {$wpdb->options} WHERE option_name=%s", $name ) ), true );
+		if ( ! empty( $draft['erased'] ) ) {
+			throw new ApiError( 'customer_erased', 'This order was anonymized.', 409 );
+		}
 		if ( empty( $draft['body']['externalOrderId'] ) ) {
 			throw new ApiError( 'outbox_unavailable', 'WooCommerce could not recover the original InkOS submission.' );
 		}
@@ -137,7 +165,7 @@ final class Orders {
 
 	public static function send( $id, $attempt = 0, $manual = false ) {
 		$order = wc_get_order( $id );
-		if ( ! $order || $order->get_meta( '_inkos_receipt' ) ) {
+		if ( ! $order || $order->get_meta( '_inkos_receipt' ) || 'yes' === $order->get_meta( '_anonymized' ) ) {
 			return;
 		}
 		$draft = $order->get_meta( '_inkos_draft' );
@@ -178,7 +206,7 @@ final class Orders {
 			self::cancel_watchdogs( $id, $attempt );
 		} catch ( ApiError $error ) {
 			$order = wc_get_order( $id );
-			if ( $order->get_meta( '_inkos_receipt' ) ) {
+			if ( $order->get_meta( '_inkos_receipt' ) || 'yes' === $order->get_meta( '_anonymized' ) || 'customer_erased' === $error->reason ) {
 				return;
 			}
 			$order->update_meta_data( '_inkos_state', $error->retryable() ? 'Retry scheduled' : 'Needs review' );
@@ -199,11 +227,17 @@ final class Orders {
 
 	public static function panel( $order ) {
 		$draft = $order->get_meta( '_inkos_draft' );
-		if ( ! $draft ) {
+		$receipt = $order->get_meta( '_inkos_receipt' );
+		$state = $order->get_meta( '_inkos_state' );
+		if ( ! $draft && ! $receipt && ! $state ) {
 			return;
 		}
-		$receipt = $order->get_meta( '_inkos_receipt' );
-		echo '<h3>InkOS synchronization</h3><p>' . esc_html( $receipt ? 'Synchronized' : $order->get_meta( '_inkos_state' ) ) . '<br><code>' . esc_html( $draft['body']['externalOrderId'] ) . '</code></p>';
+		echo '<h3>InkOS synchronization</h3><p>' . esc_html( $receipt ? 'Synchronized' : $state );
+		$external = $receipt['externalOrderId'] ?? $draft['body']['externalOrderId'] ?? '';
+		if ( '' !== $external ) {
+			echo '<br><code>' . esc_html( $external ) . '</code>';
+		}
+		echo '</p>';
 		if ( $receipt ) {
 			foreach ( $receipt['items'] as $line ) {
 				echo '<p>Order ' . esc_html( $line['orderNumber'] ) . ' · Work order ' . esc_html( $line['workOrderNumber'] ) . '</p>';
