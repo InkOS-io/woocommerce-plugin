@@ -1,0 +1,19 @@
+name: Verify plugin package
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify PHP and JavaScript syntax
+        run: |
+          find inkos-woocommerce -name '*.php' -print0 | xargs -0 -n1 php -l
+          node --check inkos-woocommerce/assets/price.js
+          python3 tests/store-checkout.py --help
+      - name: Verify published ZIP matches plugin source
+        run: |
+          python3 tools/package.py
+          unzip -t dist/inkos-woocommerce.zip
+          git diff --exit-code -- dist/inkos-woocommerce.zip
