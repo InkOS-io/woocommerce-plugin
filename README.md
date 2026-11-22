@@ -2,7 +2,7 @@
 
 Connect your print shop’s WooCommerce site to InkOS. Shoppers choose a product or variation and see the print price for their quantity. Accepted checkouts appear in the InkOS order register with one order and linked work order per print line.
 
-[Download the installable plugin ZIP](https://github.com/InkOS-io/woocommerce-plugin/raw/refs/heads/main/dist/inkos-woocommerce.zip) · [E-commerce API contract and developer examples](https://github.com/InkOS-io/ecommerce-api)
+[Download the installable plugin ZIP](dist/inkos-woocommerce.zip?raw=true) · [E-commerce API contract and developer examples](https://github.com/InkOS-io/ecommerce-api)
 
 ## Install and connect
 
